@@ -77,6 +77,7 @@ extern char *polscript;
 extern cpumask_t banned_cpus;
 extern cpumask_t unbanned_cpus;
 extern long HZ;
+extern unsigned long migrate_ratio;
 
 /*
  * Numa node access routines
@@ -105,6 +106,8 @@ extern struct irq_info *get_irq_info(int irq);
 extern void migrate_irq(GList **from, GList **to, struct irq_info *info);
 extern void free_cl_opts(void);
 extern void add_cl_banned_module(char *modname);
+extern void add_banned_irq(int irq);
+extern void remove_one_irq_from_db(int irq);
 #define irq_numa_node(irq) ((irq)->numa_node)
 
 

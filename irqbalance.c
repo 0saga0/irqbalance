@@ -67,6 +67,7 @@ GMainLoop *main_loop;
 
 char *cpu_ban_string = NULL;
 char *banned_cpumask_from_ui = NULL;
+unsigned long migrate_ratio = 0;
 
 static void sleep_approx(int seconds)
 {
@@ -96,6 +97,7 @@ struct option lopts[] = {
 	{"banmod", 1 , NULL, 'm'},
 	{"interval", 1 , NULL, 't'},
 	{"version", 0, NULL, 'V'},
+	{"migrateval", 1, NULL, 'e'},
 	{0, 0, 0, 0}
 };
 
@@ -103,7 +105,7 @@ static void usage(void)
 {
 	log(TO_CONSOLE, LOG_INFO, "irqbalance [--oneshot | -o] [--debug | -d] [--foreground | -f] [--journal | -j]\n");
 	log(TO_CONSOLE, LOG_INFO, "	[--powerthresh= | -p <off> | <n>] [--banirq= | -i <n>] [--banmod= | -m <module>] [--policyscript= | -l <script>]\n");
-	log(TO_CONSOLE, LOG_INFO, "	[--pid= | -s <file>] [--deepestcache= | -c <n>] [--interval= | -t <n>]\n");
+	log(TO_CONSOLE, LOG_INFO, "	[--pid= | -s <file>] [--deepestcache= | -c <n>] [--interval= | -t <n>] [--migrateval= | -e <n>]\n");
 }
 
 static void version(void)
@@ -118,7 +120,7 @@ static void parse_command_line(int argc, char **argv)
 	unsigned long val;
 
 	while ((opt = getopt_long(argc, argv,
-		"odfji:p:s:c:l:m:t:V",
+		"odfjVi:p:s:c:l:m:t:e:",
 		lopts, &longind)) != -1) {
 
 		switch(opt) {
@@ -187,13 +189,16 @@ static void parse_command_line(int argc, char **argv)
 					exit(1);
 				}
 				break;
+			case 'e':
+				migrate_ratio = strtoul(optarg, NULL, 10);
+				break;
 		}
 	}
 }
 #endif
 
 /*
- * This builds our object tree.  The Heirarchy is typically pretty
+ * This builds our object tree.  The Hierarchy is typically pretty
  * straightforward.
  * At the top are numa_nodes
  * CPU packages belong to a single numa_node, unless the cache domains are in
@@ -471,12 +476,9 @@ gboolean sock_handle(gint fd, GIOCondition condition, gpointer user_data __attri
 				free(irq_string);
 			} else if (!(strncmp(buff + strlen("settings "), "cpus ",
 							strlen("cpus")))) {
-				/*
-				 * if cpu_ban_string has not been consumed,
-				 * just ignore this request.
-				 */
-				if (cpu_ban_string != NULL)
-					goto out_close;
+				banned_cpumask_from_ui = NULL;
+				free(cpu_ban_string);
+				cpu_ban_string = NULL;
 
 				cpu_ban_string = malloc(
 						sizeof(char) * (recv_size - strlen("settings cpus ")));
@@ -489,15 +491,9 @@ gboolean sock_handle(gint fd, GIOCondition condition, gpointer user_data __attri
 				if (!strncmp(banned_cpumask_from_ui, "NULL", strlen("NULL"))) {
 					banned_cpumask_from_ui = NULL;
 					free(cpu_ban_string);
-					cpu_ban_string = NULL;;
-				} else {
-					/*
-					 * don't free cpu_ban_string at here, it will be
-					 * released after we have store it to @banned_cpus
-					 * in setup_banned_cpus function.
-					 */
-					need_rescan = 1;
+					cpu_ban_string = NULL;
 				}
+				need_rescan = 1;
 			}
 		}
 		if (!strncmp(buff, "setup", strlen("setup"))) {
@@ -637,7 +633,7 @@ int main(int argc, char** argv)
 
 	HZ = sysconf(_SC_CLK_TCK);
 	if (HZ == -1) {
-		log(TO_ALL, LOG_WARNING, "Unable to determin HZ defaulting to 100\n");
+		log(TO_ALL, LOG_WARNING, "Unable to determine HZ defaulting to 100\n");
 		HZ = 100;
 	}
 	
@@ -645,7 +641,7 @@ int main(int argc, char** argv)
 		int pidfd = -1;
 		if (daemon(0,0))
 			exit(EXIT_FAILURE);
-		/* Write pidfile which can be used to avoid starting mutiple instances */
+		/* Write pidfile which can be used to avoid starting multiple instances */
 		if (pidfile && (pidfd = open(pidfile,
 			O_WRONLY | O_CREAT | O_EXCL | O_TRUNC,
 			S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)) >= 0) {
